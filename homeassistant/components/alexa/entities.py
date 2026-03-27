@@ -301,8 +301,14 @@ class AlexaEntity:
 
     def description(self) -> str:
         """Return the Alexa API description."""
-        description = self.entity_conf.get(CONF_DESCRIPTION) or self.entity_id
-        return f"{description} via Home Assistant".translate(TRANSLATION_TABLE)
+        description = (self.entity_conf.get(CONF_DESCRIPTION) or self.entity_id).translate(
+            TRANSLATION_TABLE
+        )
+
+        if self.alias is not None:
+            return f"{description} (alias: {self.alias}) via Home Assistant"
+
+        return f"{description} via Home Assistant"
 
     def alexa_id(self) -> str:
         """Return the Alexa API entity id."""
@@ -390,7 +396,7 @@ class AlexaEntity:
 
 @callback
 def async_get_entities(
-    hass: HomeAssistant, config: AbstractConfig
+    hass: HomeAssistant, config: AbstractConfig, *, include_aliases: bool = True
 ) -> list[AlexaEntity]:
     """Return all entities that are supported by Alexa."""
     entities: list[AlexaEntity] = []
@@ -410,10 +416,11 @@ def async_get_entities(
             if not interfaces:
                 continue
             entities.append(alexa_entity)
-            entities.extend(
-                ENTITY_ADAPTERS[state.domain](hass, config, state, alias=alias)
-                for alias in config.get_entity_aliases(state.entity_id)
-            )
+            if include_aliases:
+                entities.extend(
+                    ENTITY_ADAPTERS[state.domain](hass, config, state, alias=alias)
+                    for alias in config.get_entity_aliases(state.entity_id)
+                )
 
     return entities
 

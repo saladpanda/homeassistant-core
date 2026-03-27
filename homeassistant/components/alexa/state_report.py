@@ -516,11 +516,7 @@ async def async_send_delete_message(
 
     https://developer.amazon.com/docs/device-apis/alexa-discovery.html#deletereport-event
     """
-    token = await config.async_get_access_token()
-
-    headers: dict[str, Any] = {"Authorization": f"Bearer {token}"}
-
-    endpoints: list[dict[str, Any]] = []
+    endpoint_ids: list[str] = []
 
     for entity_id in entity_ids:
         domain = entity_id.split(".", 1)[0]
@@ -528,10 +524,24 @@ async def async_send_delete_message(
         if domain not in ENTITY_ADAPTERS:
             continue
 
-        endpoints.extend(
-            {"endpointId": endpoint_id}
-            for endpoint_id in config.get_entity_alexa_ids(entity_id)
-        )
+        endpoint_ids.extend(config.get_entity_alexa_ids(entity_id))
+
+    unique_endpoint_ids = list(dict.fromkeys(endpoint_ids))
+
+    return await async_send_delete_message_for_endpoint_ids(
+        hass, config, unique_endpoint_ids
+    )
+
+
+async def async_send_delete_message_for_endpoint_ids(
+    hass: HomeAssistant, config: AbstractConfig, endpoint_ids: list[str]
+) -> aiohttp.ClientResponse:
+    """Send a DeleteReport message for explicit Alexa endpoint IDs."""
+    token = await config.async_get_access_token()
+
+    headers: dict[str, Any] = {"Authorization": f"Bearer {token}"}
+
+    endpoints = [{"endpointId": endpoint_id} for endpoint_id in endpoint_ids]
 
     payload: dict[str, Any] = {
         "endpoints": endpoints,

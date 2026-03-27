@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import asyncio
+from collections.abc import Collection
 import logging
 from typing import Any
 
@@ -127,7 +128,11 @@ class AbstractConfig(ABC):
         if not (entity_entry := entity_registry.async_get(entity_id)):
             return []
 
-        aliases = entity_entry.aliases
+        return self.normalize_aliases(entity_id, entity_entry.aliases)
+
+    @callback
+    def normalize_aliases(self, entity_id: str, aliases: Collection[str]) -> list[str]:
+        """Return deduplicated, sanitized aliases for an entity."""
 
         unique_aliases: list[str] = []
         seen_alexa_ids: set[str] = set()
@@ -144,13 +149,22 @@ class AbstractConfig(ABC):
         return sorted(unique_aliases, key=str.casefold)
 
     @callback
+    def get_alias_alexa_ids(
+        self, entity_id: str, aliases: Collection[str] | None = None
+    ) -> list[str]:
+        """Return alias Alexa IDs for an entity."""
+        if aliases is None:
+            aliases = self.get_entity_aliases(entity_id)
+        else:
+            aliases = self.normalize_aliases(entity_id, aliases)
+
+        return [self.generate_alexa_id_for(entity_id, alias) for alias in aliases]
+
+    @callback
     def get_entity_alexa_ids(self, entity_id: str) -> list[str]:
         """Return the canonical and alias Alexa IDs for an entity."""
         alexa_ids = [self.generate_alexa_id_for(entity_id)]
-        alexa_ids.extend(
-            self.generate_alexa_id_for(entity_id, alias)
-            for alias in self.get_entity_aliases(entity_id)
-        )
+        alexa_ids.extend(self.get_alias_alexa_ids(entity_id))
         return alexa_ids
 
     @callback
