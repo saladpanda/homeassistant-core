@@ -23,7 +23,7 @@ TEST_LOCALE = "en-US"
 class MockConfig(smart_home.AlexaConfig):
     """Mock Alexa config."""
 
-    entity_config = {
+    _entity_config = {
         "binary_sensor.test_doorbell": {"display_categories": "DOORBELL"},
         "binary_sensor.test_contact_forced": {"display_categories": "CONTACT_SENSOR"},
         "binary_sensor.test_motion_forced": {"display_categories": "MOTION_SENSOR"},
@@ -47,6 +47,11 @@ class MockConfig(smart_home.AlexaConfig):
     def supports_auth(self):
         """Return if config supports auth."""
         return True
+
+    @property
+    def entity_config(self) -> dict[str, Any]:
+        """Return entity config."""
+        return self._entity_config
 
     @callback
     def user_identifier(self):
@@ -104,6 +109,7 @@ async def assert_request_calls_service(
     response_type="Response",
     payload: dict[str, Any] | None = None,
     instance: str | None = None,
+    config_obj: MockConfig | None = None,
 ) -> tuple[ServiceCall, dict[str, Any]]:
     """Assert an API request calls a hass service."""
     context = Context()
@@ -116,15 +122,15 @@ async def assert_request_calls_service(
     domain, service_name = service.split(".")
     calls = async_mock_service(hass, domain, service_name)
 
-    msg = await smart_home.async_handle_message(
-        hass, get_default_config(hass), request, context
-    )
+    config_obj = config_obj or get_default_config(hass)
+
+    msg = await smart_home.async_handle_message(hass, config_obj, request, context)
     await hass.async_block_till_done()
 
     assert len(calls) == 1
     call = calls[0]
     assert "event" in msg
-    assert call.data["entity_id"] == endpoint.replace("#", ".")
+    assert call.data["entity_id"] == config_obj.resolve_entity_id(endpoint)
     assert msg["event"]["header"]["name"] == response_type
     assert call.context == context
 
@@ -139,6 +145,7 @@ async def assert_request_fails(
     hass: HomeAssistant,
     payload: dict[str, Any] | None = None,
     instance: str | None = None,
+    config_obj: MockConfig | None = None,
 ) -> None:
     """Assert an API request returns an ErrorResponse."""
     request = get_new_request(namespace, name, endpoint)
@@ -150,7 +157,9 @@ async def assert_request_fails(
     domain, service_name = service_not_called.split(".")
     call = async_mock_service(hass, domain, service_name)
 
-    msg = await smart_home.async_handle_message(hass, get_default_config(hass), request)
+    config_obj = config_obj or get_default_config(hass)
+
+    msg = await smart_home.async_handle_message(hass, config_obj, request)
     await hass.async_block_till_done()
 
     assert not call

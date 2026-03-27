@@ -1092,7 +1092,9 @@ async def alexa_list(
     """List all alexa entities."""
     cloud = hass.data[DATA_CLOUD]
     alexa_config = await cloud.client.get_alexa_config()
-    entities = alexa_entities.async_get_entities(hass, alexa_config)
+    entities = alexa_entities.async_get_entities(
+        hass, alexa_config, include_aliases=False
+    )
 
     result = [
         {

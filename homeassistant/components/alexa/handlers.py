@@ -126,7 +126,7 @@ async def async_api_discovery(
     Async friendly.
     """
     discovery_endpoints: list[dict[str, Any]] = []
-    for alexa_entity in async_get_entities(hass, config):
+    for alexa_entity in async_get_entities(hass, config, include_aliases=True):
         if not config.should_expose(alexa_entity.entity_id):
             continue
         try:

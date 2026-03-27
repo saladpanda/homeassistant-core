@@ -1587,6 +1587,50 @@ async def test_list_alexa_entities(
     }
 
 
+async def test_list_alexa_entities_deduplicates_aliases(
+    hass: HomeAssistant,
+    entity_registry: er.EntityRegistry,
+    hass_ws_client: WebSocketGenerator,
+    setup_cloud: None,
+) -> None:
+    """Test Alexa entity listing does not duplicate alias endpoints."""
+    client = await hass_ws_client(hass)
+
+    entry = entity_registry.async_get_or_create(
+        "light", "test", "unique", suggested_object_id="kitchen"
+    )
+    entity_registry.async_update_entity(
+        entry.entity_id, aliases={"Desk Light", "Reading Light"}
+    )
+    hass.states.async_set(entry.entity_id, "on")
+
+    with (
+        patch(
+            (
+                "homeassistant.components.cloud.alexa_config.CloudAlexaConfig"
+                ".async_get_access_token"
+            ),
+        ),
+        patch(
+            "homeassistant.components.cloud.alexa_config.alexa_state_report."
+            "async_send_add_or_update_message"
+        ),
+    ):
+        await hass.async_block_till_done()
+
+    await client.send_json_auto_id({"type": "cloud/alexa/entities"})
+    response = await client.receive_json()
+
+    assert response["success"]
+    assert response["result"] == [
+        {
+            "entity_id": "light.kitchen",
+            "display_categories": ["LIGHT"],
+            "interfaces": ["Alexa.PowerController", "Alexa.EndpointHealth", "Alexa"],
+        }
+    ]
+
+
 async def test_get_alexa_entity(
     hass: HomeAssistant,
     entity_registry: er.EntityRegistry,
