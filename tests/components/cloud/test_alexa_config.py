@@ -546,7 +546,7 @@ async def test_alexa_entity_registry_sync_aliases(
     mock_delete.assert_awaited_once_with(
         hass,
         conf,
-        ["light#kitchen::alias::Desk_Light"],
+        ["light#kitchen::alias::desk_light"],
     )
 
 
