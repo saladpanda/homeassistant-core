@@ -271,12 +271,17 @@ class AlexaEntity:
     """
 
     def __init__(
-        self, hass: HomeAssistant, config: AbstractConfig, entity: State
+        self,
+        hass: HomeAssistant,
+        config: AbstractConfig,
+        entity: State,
+        alias: str | None = None,
     ) -> None:
         """Initialize Alexa Entity."""
         self.hass = hass
         self.config = config
         self.entity = entity
+        self.alias = alias
         self.entity_conf = config.entity_config.get(entity.entity_id, {})
 
     @property
@@ -286,6 +291,9 @@ class AlexaEntity:
 
     def friendly_name(self) -> str:
         """Return the Alexa API friendly name."""
+        if self.alias is not None:
+            return self.alias.translate(TRANSLATION_TABLE)
+
         friendly_name: str = self.entity_conf.get(
             CONF_NAME, self.entity.name
         ).translate(TRANSLATION_TABLE)
@@ -298,7 +306,19 @@ class AlexaEntity:
 
     def alexa_id(self) -> str:
         """Return the Alexa API entity id."""
-        return self.config.generate_alexa_id(self.entity.entity_id)
+        return self.config.generate_alexa_id_for(self.entity.entity_id, self.alias)
+
+    def custom_identifier(self) -> str:
+        """Return the Alexa custom identifier."""
+        custom_identifier = f"{self.config.user_identifier()}-{self.entity_id}"
+
+        if self.alias is None:
+            return custom_identifier
+
+        return (
+            f"{custom_identifier}-alias-"
+            f"{self.alias.replace(' ', '_')}"
+        )
 
     def display_categories(self) -> list[str] | None:
         """Return a list of display categories."""
@@ -345,7 +365,7 @@ class AlexaEntity:
                 "manufacturer": "Home Assistant",
                 "model": self.entity.domain,
                 "softwareVersion": __version__,
-                "customIdentifier": f"{self.config.user_identifier()}-{self.entity_id}",
+                "customIdentifier": self.custom_identifier(),
             },
         }
 
@@ -390,6 +410,10 @@ def async_get_entities(
             if not interfaces:
                 continue
             entities.append(alexa_entity)
+            entities.extend(
+                ENTITY_ADAPTERS[state.domain](hass, config, state, alias=alias)
+                for alias in config.get_entity_aliases(state.entity_id)
+            )
 
     return entities
 
