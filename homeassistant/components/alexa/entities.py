@@ -50,6 +50,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.helpers import network
 from homeassistant.helpers.entity import entity_sources
+from homeassistant.util import slugify
 from homeassistant.util.decorator import Registry
 
 from .capabilities import (
@@ -321,10 +322,7 @@ class AlexaEntity:
         if self.alias is None:
             return custom_identifier
 
-        return (
-            f"{custom_identifier}-alias-"
-            f"{self.alias.replace(' ', '_')}"
-        )
+        return f"{custom_identifier}-alias-{slugify(self.alias)}"
 
     def display_categories(self) -> list[str] | None:
         """Return a list of display categories."""

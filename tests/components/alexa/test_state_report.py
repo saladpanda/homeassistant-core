@@ -91,7 +91,7 @@ async def test_report_state_aliases(
         for call in aioclient_mock.mock_calls
     ] == [
         "binary_sensor#test_contact",
-        "binary_sensor#test_contact::alias::Back_Door",
+        "binary_sensor#test_contact::alias::back_door",
     ]
 
 
@@ -568,7 +568,53 @@ async def test_send_add_or_update_message_aliases(
         for endpoint in call_json["event"]["payload"]["endpoints"]
     ] == [
         "binary_sensor#test_contact",
-        "binary_sensor#test_contact::alias::Back_Door",
+        "binary_sensor#test_contact::alias::back_door",
+    ]
+
+
+async def test_send_add_or_update_message_aliases_slugify_non_ascii_identifiers(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Test AddOrUpdateReport slugifies non-ASCII alias identifiers."""
+    aioclient_mock.post(TEST_URL, text="")
+
+    entity_registry.async_get_or_create(
+        "script", "test", "bla", suggested_object_id="bla"
+    )
+    entity_registry.async_update_entity("script.bla", aliases={"Bad lüften lassen3"})
+
+    hass.states.async_set(
+        "script.bla",
+        "off",
+        {"friendly_name": "Bad lüften lassen"},
+    )
+
+    await state_report.async_send_add_or_update_message(
+        hass,
+        get_default_config(hass),
+        ["script.bla"],
+    )
+
+    call_json = aioclient_mock.mock_calls[0][2]
+    assert [
+        endpoint["friendlyName"]
+        for endpoint in call_json["event"]["payload"]["endpoints"]
+    ] == ["Bad lüften lassen", "Bad lüften lassen3"]
+    assert [
+        endpoint["endpointId"]
+        for endpoint in call_json["event"]["payload"]["endpoints"]
+    ] == [
+        "script#bla",
+        "script#bla::alias::bad_luften_lassen3",
+    ]
+    assert [
+        endpoint["additionalAttributes"]["customIdentifier"]
+        for endpoint in call_json["event"]["payload"]["endpoints"]
+    ] == [
+        "mock-user-id-script.bla",
+        "mock-user-id-script.bla-alias-bad_luften_lassen3",
     ]
 
 
@@ -629,7 +675,7 @@ async def test_send_delete_message_aliases(
         for endpoint in call_json["event"]["payload"]["endpoints"]
     ] == [
         "binary_sensor#test_contact",
-        "binary_sensor#test_contact::alias::Back_Door",
+        "binary_sensor#test_contact::alias::back_door",
     ]
 
 
@@ -743,7 +789,7 @@ async def test_doorbell_event_aliases(
         for call in aioclient_mock.mock_calls
     ] == [
         "binary_sensor#test_doorbell",
-        "binary_sensor#test_doorbell::alias::Front_Bell",
+        "binary_sensor#test_doorbell::alias::front_bell",
     ]
 
 

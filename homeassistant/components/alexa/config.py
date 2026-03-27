@@ -13,6 +13,7 @@ from yarl import URL
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
+from homeassistant.util import slugify
 
 from .const import DOMAIN
 from .entities import TRANSLATION_TABLE
@@ -116,10 +117,7 @@ class AbstractConfig(ABC):
         if alias is None:
             return alexa_id
 
-        return (
-            f"{alexa_id}{self._ALEXA_ALIAS_DELIMITER}"
-            f"{alias.translate(TRANSLATION_TABLE).replace(' ', '_')}"
-        )
+        return f"{alexa_id}{self._ALEXA_ALIAS_DELIMITER}{slugify(alias)}"
 
     @callback
     def get_entity_aliases(self, entity_id: str) -> list[str]:
