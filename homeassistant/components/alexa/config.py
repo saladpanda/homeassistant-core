@@ -8,6 +8,7 @@ from typing import Any
 from yarl import URL
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
@@ -22,6 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 class AbstractConfig(ABC):
     """Hold the configuration for Alexa."""
 
+    _ALEXA_ALIAS_DELIMITER = "::alias::"
     _store: AlexaConfigStore
     _unsub_proactive_report: CALLBACK_TYPE | None = None
 
@@ -102,7 +104,58 @@ class AbstractConfig(ABC):
 
     def generate_alexa_id(self, entity_id: str) -> str:
         """Return the alexa ID for an entity ID."""
-        return entity_id.replace(".", "#").translate(TRANSLATION_TABLE)
+        return self.generate_alexa_id_for(entity_id)
+
+    def generate_alexa_id_for(self, entity_id: str, alias: str | None = None) -> str:
+        """Return the Alexa ID for an entity ID and optional alias."""
+        alexa_id = entity_id.replace(".", "#").translate(TRANSLATION_TABLE)
+
+        if alias is None:
+            return alexa_id
+
+        return (
+            f"{alexa_id}{self._ALEXA_ALIAS_DELIMITER}"
+            f"{alias.translate(TRANSLATION_TABLE).replace(' ', '_')}"
+        )
+
+    @callback
+    def get_entity_aliases(self, entity_id: str) -> list[str]:
+        """Return configured aliases for an entity."""
+        entity_registry = er.async_get(self.hass)
+        if not (entity_entry := entity_registry.async_get(entity_id)):
+            return []
+
+        aliases = entity_entry.aliases
+
+        unique_aliases: list[str] = []
+        seen_alexa_ids: set[str] = set()
+
+        for alias in aliases:
+            translated_alias = alias.translate(TRANSLATION_TABLE).strip()
+            alias_id = self.generate_alexa_id_for(entity_id, translated_alias)
+
+            if not translated_alias or alias_id in seen_alexa_ids:
+                continue
+            seen_alexa_ids.add(alias_id)
+            unique_aliases.append(translated_alias)
+
+        return sorted(unique_aliases, key=str.casefold)
+
+    @callback
+    def get_entity_alexa_ids(self, entity_id: str) -> list[str]:
+        """Return the canonical and alias Alexa IDs for an entity."""
+        alexa_ids = [self.generate_alexa_id_for(entity_id)]
+        alexa_ids.extend(
+            self.generate_alexa_id_for(entity_id, alias)
+            for alias in self.get_entity_aliases(entity_id)
+        )
+        return alexa_ids
+
+    @callback
+    def resolve_entity_id(self, endpoint_id: str) -> str:
+        """Resolve an Alexa endpoint ID back to an entity ID."""
+        entity_endpoint_id = endpoint_id.split(self._ALEXA_ALIAS_DELIMITER, 1)[0]
+        return entity_endpoint_id.replace("#", ".")
 
     @callback
     def async_invalidate_access_token(self) -> None:

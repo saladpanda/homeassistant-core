@@ -110,7 +110,7 @@ class AlexaDirective:
         malformed or nonexistent.
         """
         _endpoint_id: str = self._directive[API_ENDPOINT]["endpointId"]
-        self.entity_id = _endpoint_id.replace("#", ".")
+        self.entity_id = config.resolve_entity_id(_endpoint_id)
 
         entity: State | None = hass.states.get(self.entity_id)
         if not entity or not config.should_expose(self.entity_id):
@@ -398,69 +398,68 @@ async def async_send_changereport_message(
 
     headers: dict[str, Any] = {"Authorization": f"Bearer {token}"}
 
-    endpoint = alexa_entity.alexa_id()
-
     payload: dict[str, Any] = {
         API_CHANGE: {
             "cause": {"type": Cause.APP_INTERACTION},
             "properties": alexa_properties,
         }
     }
-
-    message = AlexaResponse(name="ChangeReport", namespace="Alexa", payload=payload)
-    message.set_endpoint_full(token, endpoint)
-
-    message_serialized = message.serialize()
     session = async_get_clientsession(hass)
 
     assert config.endpoint is not None
-    try:
-        async with timeout(DEFAULT_TIMEOUT):
-            response = await session.post(
-                config.endpoint,
-                headers=headers,
-                json=message_serialized,
-                allow_redirects=True,
-            )
 
-    except TimeoutError, aiohttp.ClientError:
-        _LOGGER.error("Timeout sending report to Alexa for %s", alexa_entity.entity_id)
-        return
+    for endpoint in config.get_entity_alexa_ids(alexa_entity.entity_id):
+        message = AlexaResponse(name="ChangeReport", namespace="Alexa", payload=payload)
+        message.set_endpoint_full(token, endpoint)
 
-    response_text = await response.text()
+        message_serialized = message.serialize()
+        try:
+            async with timeout(DEFAULT_TIMEOUT):
+                response = await session.post(
+                    config.endpoint,
+                    headers=headers,
+                    json=message_serialized,
+                    allow_redirects=True,
+                )
 
-    if _LOGGER.isEnabledFor(logging.DEBUG):
-        _LOGGER.debug(
-            "Sent: %s", json.dumps(async_redact_auth_data(message_serialized))
-        )
-        _LOGGER.debug("Received (%s): %s", response.status, response_text)
-
-    if response.status == HTTPStatus.ACCEPTED:
-        return
-
-    response_json = json_loads_object(response_text)
-    response_payload = cast(JsonObjectType, response_json["payload"])
-
-    if response_payload["code"] == "INVALID_ACCESS_TOKEN_EXCEPTION":
-        if invalidate_access_token:
-            # Invalidate the access token and try again
-            config.async_invalidate_access_token()
-            await async_send_changereport_message(
-                hass,
-                config,
-                alexa_entity,
-                alexa_properties,
-                invalidate_access_token=False,
-            )
+        except TimeoutError, aiohttp.ClientError:
+            _LOGGER.error("Timeout sending report to Alexa for %s", alexa_entity.entity_id)
             return
-        await config.set_authorized(False)
 
-    _LOGGER.error(
-        "Error when sending ChangeReport for %s to Alexa: %s: %s",
-        alexa_entity.entity_id,
-        response_payload["code"],
-        response_payload["description"],
-    )
+        response_text = await response.text()
+
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "Sent: %s", json.dumps(async_redact_auth_data(message_serialized))
+            )
+            _LOGGER.debug("Received (%s): %s", response.status, response_text)
+
+        if response.status == HTTPStatus.ACCEPTED:
+            continue
+
+        response_json = json_loads_object(response_text)
+        response_payload = cast(JsonObjectType, response_json["payload"])
+
+        if response_payload["code"] == "INVALID_ACCESS_TOKEN_EXCEPTION":
+            if invalidate_access_token:
+                # Invalidate the access token and try again
+                config.async_invalidate_access_token()
+                await async_send_changereport_message(
+                    hass,
+                    config,
+                    alexa_entity,
+                    alexa_properties,
+                    invalidate_access_token=False,
+                )
+                return
+            await config.set_authorized(False)
+
+        _LOGGER.error(
+            "Error when sending ChangeReport for %s to Alexa: %s: %s",
+            alexa_entity.entity_id,
+            response_payload["code"],
+            response_payload["description"],
+        )
 
 
 async def async_send_add_or_update_message(
@@ -485,6 +484,10 @@ async def async_send_add_or_update_message(
 
         alexa_entity = ENTITY_ADAPTERS[domain](hass, config, state)
         endpoints.append(alexa_entity.serialize_discovery())
+        endpoints.extend(
+            ENTITY_ADAPTERS[domain](hass, config, state, alias=alias).serialize_discovery()
+            for alias in config.get_entity_aliases(entity_id)
+        )
 
     payload: dict[str, Any] = {
         "endpoints": endpoints,
@@ -523,7 +526,10 @@ async def async_send_delete_message(
         if domain not in ENTITY_ADAPTERS:
             continue
 
-        endpoints.append({"endpointId": config.generate_alexa_id(entity_id)})
+        endpoints.extend(
+            {"endpointId": endpoint_id}
+            for endpoint_id in config.get_entity_alexa_ids(entity_id)
+        )
 
     payload: dict[str, Any] = {
         "endpoints": endpoints,
@@ -554,53 +560,53 @@ async def async_send_doorbell_event_message(
 
     headers: dict[str, Any] = {"Authorization": f"Bearer {token}"}
 
-    endpoint = alexa_entity.alexa_id()
-
-    message = AlexaResponse(
-        name="DoorbellPress",
-        namespace="Alexa.DoorbellEventSource",
-        payload={
-            "cause": {"type": Cause.PHYSICAL_INTERACTION},
-            "timestamp": dt_util.utcnow().strftime(DATE_FORMAT),
-        },
-    )
-
-    message.set_endpoint_full(token, endpoint)
-
-    message_serialized = message.serialize()
     session = async_get_clientsession(hass)
 
     assert config.endpoint is not None
-    try:
-        async with timeout(DEFAULT_TIMEOUT):
-            response = await session.post(
-                config.endpoint,
-                headers=headers,
-                json=message_serialized,
-                allow_redirects=True,
-            )
 
-    except TimeoutError, aiohttp.ClientError:
-        _LOGGER.error("Timeout sending report to Alexa for %s", alexa_entity.entity_id)
-        return
-
-    response_text = await response.text()
-
-    if _LOGGER.isEnabledFor(logging.DEBUG):
-        _LOGGER.debug(
-            "Sent: %s", json.dumps(async_redact_auth_data(message_serialized))
+    for endpoint in config.get_entity_alexa_ids(alexa_entity.entity_id):
+        message = AlexaResponse(
+            name="DoorbellPress",
+            namespace="Alexa.DoorbellEventSource",
+            payload={
+                "cause": {"type": Cause.PHYSICAL_INTERACTION},
+                "timestamp": dt_util.utcnow().strftime(DATE_FORMAT),
+            },
         )
-        _LOGGER.debug("Received (%s): %s", response.status, response_text)
 
-    if response.status == HTTPStatus.ACCEPTED:
-        return
+        message.set_endpoint_full(token, endpoint)
 
-    response_json = json_loads_object(response_text)
-    response_payload = cast(JsonObjectType, response_json["payload"])
+        message_serialized = message.serialize()
+        try:
+            async with timeout(DEFAULT_TIMEOUT):
+                response = await session.post(
+                    config.endpoint,
+                    headers=headers,
+                    json=message_serialized,
+                    allow_redirects=True,
+                )
 
-    _LOGGER.error(
-        "Error when sending DoorbellPress event for %s to Alexa: %s: %s",
-        alexa_entity.entity_id,
-        response_payload["code"],
-        response_payload["description"],
-    )
+        except TimeoutError, aiohttp.ClientError:
+            _LOGGER.error("Timeout sending report to Alexa for %s", alexa_entity.entity_id)
+            return
+
+        response_text = await response.text()
+
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "Sent: %s", json.dumps(async_redact_auth_data(message_serialized))
+            )
+            _LOGGER.debug("Received (%s): %s", response.status, response_text)
+
+        if response.status == HTTPStatus.ACCEPTED:
+            continue
+
+        response_json = json_loads_object(response_text)
+        response_payload = cast(JsonObjectType, response_json["payload"])
+
+        _LOGGER.error(
+            "Error when sending DoorbellPress event for %s to Alexa: %s: %s",
+            alexa_entity.entity_id,
+            response_payload["code"],
+            response_payload["description"],
+        )
