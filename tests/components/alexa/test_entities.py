@@ -131,15 +131,15 @@ async def test_serialize_discovery_aliases(
     ]
     assert [endpoint["endpointId"] for endpoint in endpoints] == [
         "switch#bla",
-        "switch#bla::alias::Desk_Light",
-        "switch#bla::alias::Reading_Light",
+        "switch#bla::alias::desk_light",
+        "switch#bla::alias::reading_light",
     ]
     assert [
         endpoint["additionalAttributes"]["customIdentifier"] for endpoint in endpoints
     ] == [
         "mock-user-id-switch.bla",
-        "mock-user-id-switch.bla-alias-Desk_Light",
-        "mock-user-id-switch.bla-alias-Reading_Light",
+        "mock-user-id-switch.bla-alias-desk_light",
+        "mock-user-id-switch.bla-alias-reading_light",
     ]
 
 
@@ -154,12 +154,12 @@ async def test_alias_endpoint_routes_to_canonical_entity(
     _, msg = await assert_request_calls_service(
         "Alexa.PowerController",
         "TurnOff",
-        "switch#bla::alias::Desk_Light",
+        "switch#bla::alias::desk_light",
         "switch.turn_off",
         hass,
     )
 
-    assert msg["event"]["endpoint"]["endpointId"] == "switch#bla::alias::Desk_Light"
+    assert msg["event"]["endpoint"]["endpointId"] == "switch#bla::alias::desk_light"
 
 
 async def test_serialize_discovery_aliases_sanitized(
@@ -183,7 +183,28 @@ async def test_serialize_discovery_aliases_sanitized(
         alias_endpoint["description"]
         == "switch.bla (alias: Desk Lamp Zone) via Home Assistant"
     )
-    assert alias_endpoint["endpointId"] == "switch#bla::alias::Desk_Lamp_Zone"
+    assert alias_endpoint["endpointId"] == "switch#bla::alias::desk_lamp_zone"
+
+
+async def test_serialize_discovery_aliases_slugify_non_ascii_identifiers(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    """Test alias endpoints slugify non-ASCII identifier fields."""
+    request = get_new_request("Alexa.Discovery", "Discover")
+
+    entity_registry.async_get_or_create("script", "test", "bla", suggested_object_id="bla")
+    entity_registry.async_update_entity("script.bla", aliases={"Bad lüften lassen3"})
+    hass.states.async_set("script.bla", "off", {"friendly_name": "Bad lüften lassen"})
+
+    msg = await smart_home.async_handle_message(hass, get_default_config(hass), request)
+
+    alias_endpoint = msg["event"]["payload"]["endpoints"][1]
+    assert alias_endpoint["friendlyName"] == "Bad lüften lassen3"
+    assert alias_endpoint["endpointId"] == "script#bla::alias::bad_luften_lassen3"
+    assert (
+        alias_endpoint["additionalAttributes"]["customIdentifier"]
+        == "mock-user-id-script.bla-alias-bad_luften_lassen3"
+    )
 
 
 async def test_serialize_discovery_partly_fails(
