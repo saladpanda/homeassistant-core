@@ -11,7 +11,11 @@ from homeassistant.const import EntityCategory, UnitOfTemperature, __version__
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from .test_common import get_default_config, get_new_request
+from .test_common import (
+    assert_request_calls_service,
+    get_default_config,
+    get_new_request,
+)
 
 
 async def test_unsupported_domain(hass: HomeAssistant) -> None:
@@ -95,6 +99,91 @@ async def test_serialize_discovery(hass: HomeAssistant) -> None:
         "softwareVersion": __version__,
         "customIdentifier": "mock-user-id-switch.bla",
     }
+
+
+async def test_serialize_discovery_aliases(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    """Test discovery includes alias endpoints."""
+    request = get_new_request("Alexa.Discovery", "Discover")
+
+    entity_registry.async_get_or_create("switch", "test", "bla", suggested_object_id="bla")
+    entity_registry.async_update_entity(
+        "switch.bla",
+        aliases={"Desk Light", "Reading Light"},
+    )
+    hass.states.async_set("switch.bla", "on", {"friendly_name": "Boop Woz"})
+
+    msg = await smart_home.async_handle_message(hass, get_default_config(hass), request)
+
+    endpoints = msg["event"]["payload"]["endpoints"]
+
+    assert len(endpoints) == 3
+    assert [endpoint["friendlyName"] for endpoint in endpoints] == [
+        "Boop Woz",
+        "Desk Light",
+        "Reading Light",
+    ]
+    assert [endpoint["description"] for endpoint in endpoints] == [
+        "switch.bla via Home Assistant",
+        "switch.bla (alias: Desk Light) via Home Assistant",
+        "switch.bla (alias: Reading Light) via Home Assistant",
+    ]
+    assert [endpoint["endpointId"] for endpoint in endpoints] == [
+        "switch#bla",
+        "switch#bla::alias::Desk_Light",
+        "switch#bla::alias::Reading_Light",
+    ]
+    assert [
+        endpoint["additionalAttributes"]["customIdentifier"] for endpoint in endpoints
+    ] == [
+        "mock-user-id-switch.bla",
+        "mock-user-id-switch.bla-alias-Desk_Light",
+        "mock-user-id-switch.bla-alias-Reading_Light",
+    ]
+
+
+async def test_alias_endpoint_routes_to_canonical_entity(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    """Test alias endpoints call the original Home Assistant entity."""
+    entity_registry.async_get_or_create("switch", "test", "bla", suggested_object_id="bla")
+    entity_registry.async_update_entity("switch.bla", aliases={"Desk Light"})
+    hass.states.async_set("switch.bla", "on", {"friendly_name": "Boop Woz"})
+
+    _, msg = await assert_request_calls_service(
+        "Alexa.PowerController",
+        "TurnOff",
+        "switch#bla::alias::Desk_Light",
+        "switch.turn_off",
+        hass,
+    )
+
+    assert msg["event"]["endpoint"]["endpointId"] == "switch#bla::alias::Desk_Light"
+
+
+async def test_serialize_discovery_aliases_sanitized(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    """Test alias endpoints sanitize names and endpoint ids consistently."""
+    request = get_new_request("Alexa.Discovery", "Discover")
+
+    entity_registry.async_get_or_create("switch", "test", "bla", suggested_object_id="bla")
+    entity_registry.async_update_entity(
+        "switch.bla",
+        aliases={'Desk (Lamp) "Zone"'},
+    )
+    hass.states.async_set("switch.bla", "on", {"friendly_name": "Boop Woz"})
+
+    msg = await smart_home.async_handle_message(hass, get_default_config(hass), request)
+
+    alias_endpoint = msg["event"]["payload"]["endpoints"][1]
+    assert alias_endpoint["friendlyName"] == "Desk Lamp Zone"
+    assert (
+        alias_endpoint["description"]
+        == "switch.bla (alias: Desk Lamp Zone) via Home Assistant"
+    )
+    assert alias_endpoint["endpointId"] == "switch#bla::alias::Desk_Lamp_Zone"
 
 
 async def test_serialize_discovery_partly_fails(

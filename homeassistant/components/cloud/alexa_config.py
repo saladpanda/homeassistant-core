@@ -1,7 +1,7 @@
 """Alexa configuration for Home Assistant Cloud."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from datetime import datetime, timedelta
 import logging
@@ -463,7 +463,9 @@ class CloudAlexaConfig(alexa_config.AbstractConfig):
 
         is_enabled = self.enabled
 
-        for entity in alexa_entities.async_get_entities(self.hass, self):
+        for entity in alexa_entities.async_get_entities(
+            self.hass, self, include_aliases=False
+        ):
             if is_enabled and self.should_expose(entity.entity_id):
                 to_update.append(entity.entity_id)
             else:
@@ -522,22 +524,56 @@ class CloudAlexaConfig(alexa_config.AbstractConfig):
 
         entity_id = event.data["entity_id"]
 
-        if not self.should_expose(entity_id):
-            return
-
         to_update: list[str] = []
         to_remove: list[str] = []
+        stale_endpoint_ids: list[str] = []
 
         if event.data["action"] == "create":
+            if not self.should_expose(entity_id):
+                return
             to_update.append(entity_id)
         elif event.data["action"] == "remove":
+            if not self.should_expose(entity_id):
+                return
             to_remove.append(entity_id)
-        elif event.data["action"] == "update" and bool(
-            set(event.data["changes"]) & er.ENTITY_DESCRIBING_ATTRIBUTES
-        ):
-            to_update.append(entity_id)
+        elif event.data["action"] == "update":
+            changes = event.data["changes"]
+            change_keys = set(changes)
+            aliases_changed = "aliases" in change_keys
+            describing_update = bool(change_keys & er.ENTITY_DESCRIBING_ATTRIBUTES)
+
+            if not self.should_expose(entity_id):
+                return
+
+            if aliases_changed or describing_update:
+                to_update.append(entity_id)
+
+            old_aliases = changes.get("aliases") if isinstance(changes, Mapping) else None
+
             if "old_entity_id" in event.data:
-                to_remove.append(event.data["old_entity_id"])
+                old_entity_id = event.data["old_entity_id"]
+                to_remove.append(old_entity_id)
+                stale_endpoint_ids.extend(
+                    self.get_alias_alexa_ids(
+                        old_entity_id,
+                        old_aliases
+                        if old_aliases is not None
+                        else self.get_entity_aliases(entity_id),
+                    )
+                )
+            elif aliases_changed and old_aliases is not None:
+                stale_endpoint_ids.extend(
+                    sorted(
+                        set(self.get_alias_alexa_ids(entity_id, old_aliases))
+                        - set(self.get_alias_alexa_ids(entity_id))
+                    )
+                )
 
         with suppress(alexa_errors.NoTokenAvailable):
-            await self._sync_helper(to_update, to_remove)
+            sync_success = await self._sync_helper(to_update, to_remove)
+            if sync_success and stale_endpoint_ids:
+                await alexa_state_report.async_send_delete_message_for_endpoint_ids(
+                    self.hass,
+                    self,
+                    stale_endpoint_ids,
+                )
