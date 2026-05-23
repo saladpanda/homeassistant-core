@@ -12,6 +12,7 @@ from yarl import URL
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity_registry import COMPUTED_NAME
 from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
 
@@ -126,7 +127,9 @@ class AbstractConfig(ABC):
         if not (entity_entry := entity_registry.async_get(entity_id)):
             return []
 
-        return self.normalize_aliases(entity_id, entity_entry.aliases)
+        return self.normalize_aliases(
+            entity_id, er.async_get_entity_aliases(self.hass, entity_entry)
+        )
 
     @callback
     def normalize_aliases(self, entity_id: str, aliases: Collection[str]) -> list[str]:
@@ -136,6 +139,8 @@ class AbstractConfig(ABC):
         seen_alexa_ids: set[str] = set()
 
         for alias in aliases:
+            if alias is COMPUTED_NAME:
+                continue
             translated_alias = alias.translate(TRANSLATION_TABLE).strip()
             alias_id = self.generate_alexa_id_for(entity_id, translated_alias)
 
