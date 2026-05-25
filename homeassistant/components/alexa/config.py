@@ -127,9 +127,7 @@ class AbstractConfig(ABC):
         if not (entity_entry := entity_registry.async_get(entity_id)):
             return []
 
-        return self.normalize_aliases(
-            entity_id, er.async_get_entity_aliases(self.hass, entity_entry)
-        )
+        return self.normalize_aliases(entity_id, entity_entry.aliases)
 
     @callback
     def normalize_aliases(self, entity_id: str, aliases: Collection[str]) -> list[str]:
