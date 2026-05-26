@@ -18,6 +18,7 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .test_common import TEST_URL, get_default_config
 
@@ -58,6 +59,47 @@ async def test_report_state(
         == "NOT_DETECTED"
     )
     assert call_json["event"]["endpoint"]["endpointId"] == "binary_sensor#test_contact"
+
+
+async def test_report_state_aliases(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Test proactive state reports for canonical and alias endpoints."""
+    aioclient_mock.post(TEST_URL, text="", status=202)
+
+    entity_registry.async_get_or_create(
+        "binary_sensor", "test", "test_contact", suggested_object_id="test_contact"
+    )
+    entity_registry.async_update_entity(
+        "binary_sensor.test_contact", aliases={"Back Door"}
+    )
+
+    hass.states.async_set(
+        "binary_sensor.test_contact",
+        "on",
+        {"friendly_name": "Test Contact Sensor", "device_class": "door"},
+    )
+
+    await state_report.async_enable_proactive_mode(hass, get_default_config(hass))
+
+    hass.states.async_set(
+        "binary_sensor.test_contact",
+        "off",
+        {"friendly_name": "Test Contact Sensor", "device_class": "door"},
+    )
+
+    await hass.async_block_till_done()
+
+    assert len(aioclient_mock.mock_calls) == 2
+    assert [
+        call[2]["event"]["endpoint"]["endpointId"]
+        for call in aioclient_mock.mock_calls
+    ] == [
+        "binary_sensor#test_contact",
+        "binary_sensor#test_contact::alias::back_door",
+    ]
 
 
 async def test_report_state_fail(
@@ -500,6 +542,89 @@ async def test_send_add_or_update_message(
     )
 
 
+async def test_send_add_or_update_message_aliases(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Test AddOrUpdateReport includes alias endpoints."""
+    aioclient_mock.post(TEST_URL, text="")
+
+    entity_registry.async_get_or_create(
+        "binary_sensor", "test", "test_contact", suggested_object_id="test_contact"
+    )
+    entity_registry.async_update_entity(
+        "binary_sensor.test_contact", aliases={"Back Door"}
+    )
+
+    hass.states.async_set(
+        "binary_sensor.test_contact",
+        "on",
+        {"friendly_name": "Test Contact Sensor", "device_class": "door"},
+    )
+
+    await state_report.async_send_add_or_update_message(
+        hass,
+        get_default_config(hass),
+        ["binary_sensor.test_contact"],
+    )
+
+    call_json = aioclient_mock.mock_calls[0][2]
+    assert [
+        endpoint["endpointId"]
+        for endpoint in call_json["event"]["payload"]["endpoints"]
+    ] == [
+        "binary_sensor#test_contact",
+        "binary_sensor#test_contact::alias::back_door",
+    ]
+
+
+async def test_send_add_or_update_message_aliases_slugify_non_ascii_identifiers(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Test AddOrUpdateReport slugifies non-ASCII alias identifiers."""
+    aioclient_mock.post(TEST_URL, text="")
+
+    entity_registry.async_get_or_create(
+        "script", "test", "bla", suggested_object_id="bla"
+    )
+    entity_registry.async_update_entity("script.bla", aliases={"Bad lüften lassen3"})
+
+    hass.states.async_set(
+        "script.bla",
+        "off",
+        {"friendly_name": "Bad lüften lassen"},
+    )
+
+    await state_report.async_send_add_or_update_message(
+        hass,
+        get_default_config(hass),
+        ["script.bla"],
+    )
+
+    call_json = aioclient_mock.mock_calls[0][2]
+    assert [
+        endpoint["friendlyName"]
+        for endpoint in call_json["event"]["payload"]["endpoints"]
+    ] == ["Bad lüften lassen", "Bad lüften lassen3"]
+    assert [
+        endpoint["endpointId"]
+        for endpoint in call_json["event"]["payload"]["endpoints"]
+    ] == [
+        "script#bla",
+        "script#bla::alias::bad_luften_lassen3",
+    ]
+    assert [
+        endpoint["additionalAttributes"]["customIdentifier"]
+        for endpoint in call_json["event"]["payload"]["endpoints"]
+    ] == [
+        "mock-user-id-script.bla",
+        "mock-user-id-script.bla-alias-bad_luften_lassen3",
+    ]
+
+
 async def test_send_delete_message(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
 ) -> None:
@@ -527,6 +652,38 @@ async def test_send_delete_message(
         call_json["event"]["payload"]["endpoints"][0]["endpointId"]
         == "binary_sensor#test_contact"
     )
+
+
+async def test_send_delete_message_aliases(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Test DeleteReport includes alias endpoints."""
+    aioclient_mock.post(TEST_URL, json={"data": "is irrelevant"})
+
+    entity_registry.async_get_or_create(
+        "binary_sensor", "test", "test_contact", suggested_object_id="test_contact"
+    )
+    entity_registry.async_update_entity(
+        "binary_sensor.test_contact", aliases={"Back Door"}
+    )
+
+    await state_report.async_send_delete_message(
+        hass,
+        get_default_config(hass),
+        ["binary_sensor.test_contact"],
+    )
+
+    call_json = aioclient_mock.mock_calls[0][2]
+    assert call_json["event"]["header"]["name"] == "DeleteReport"
+    assert [
+        endpoint["endpointId"]
+        for endpoint in call_json["event"]["payload"]["endpoints"]
+    ] == [
+        "binary_sensor#test_contact",
+        "binary_sensor#test_contact::alias::back_door",
+    ]
 
 
 async def test_doorbell_event_binary_sensor(
@@ -711,6 +868,53 @@ async def test_doorbell_event_for_event_entity(
     await hass.async_block_till_done()
 
     assert len(aioclient_mock.mock_calls) == 2
+
+
+async def test_doorbell_event_aliases(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Test doorbell press reports for canonical and alias endpoints."""
+    aioclient_mock.post(TEST_URL, text="", status=202)
+
+    entity_registry.async_get_or_create(
+        "binary_sensor", "test", "test_doorbell", suggested_object_id="test_doorbell"
+    )
+    entity_registry.async_update_entity(
+        "binary_sensor.test_doorbell", aliases={"Front Bell"}
+    )
+
+    hass.states.async_set(
+        "binary_sensor.test_doorbell",
+        "off",
+        {
+            "friendly_name": "Test Doorbell Sensor",
+            "device_class": "occupancy",
+        },
+    )
+
+    await state_report.async_enable_proactive_mode(hass, get_default_config(hass))
+
+    hass.states.async_set(
+        "binary_sensor.test_doorbell",
+        "on",
+        {
+            "friendly_name": "Test Doorbell Sensor",
+            "device_class": "occupancy",
+        },
+    )
+
+    await hass.async_block_till_done()
+
+    assert len(aioclient_mock.mock_calls) == 2
+    assert [
+        call[2]["event"]["endpoint"]["endpointId"]
+        for call in aioclient_mock.mock_calls
+    ] == [
+        "binary_sensor#test_doorbell",
+        "binary_sensor#test_doorbell::alias::front_bell",
+    ]
 
 
 async def test_doorbell_event_from_unknown(
