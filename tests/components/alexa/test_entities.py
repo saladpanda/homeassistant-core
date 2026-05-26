@@ -483,3 +483,40 @@ async def test_mode_controller_is_omitted_if_no_modes_are_set(
     }
 
     assert ("Alexa.ModeController" in interfaces) is mode_controller_exists
+
+
+async def test_serialize_discovery_no_aliases(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    """Test entity without aliases produces a single canonical endpoint."""
+    request = get_new_request("Alexa.Discovery", "Discover")
+
+    entity_registry.async_get_or_create("switch", "test", "bla", suggested_object_id="bla")
+    hass.states.async_set("switch.bla", "on", {"friendly_name": "Boop Woz"})
+
+    msg = await smart_home.async_handle_message(hass, get_default_config(hass), request)
+
+    endpoints = msg["event"]["payload"]["endpoints"]
+    assert len(endpoints) == 1
+    assert endpoints[0]["friendlyName"] == "Boop Woz"
+    assert endpoints[0]["endpointId"] == "switch#bla"
+
+
+async def test_report_state_through_alias_endpoint(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    """Test ReportState request routed through alias endpoint ID."""
+    entity_registry.async_get_or_create("switch", "test", "bla", suggested_object_id="bla")
+    entity_registry.async_update_entity("switch.bla", aliases={"Desk Light"})
+    hass.states.async_set("switch.bla", "on", {"friendly_name": "Boop Woz"})
+
+    request = get_new_request(
+        "Alexa",
+        "ReportState",
+        "switch#bla::alias::desk_light",
+    )
+
+    msg = await smart_home.async_handle_message(hass, get_default_config(hass), request)
+
+    assert msg["event"]["header"]["name"] == "StateReport"
+    assert msg["event"]["endpoint"]["endpointId"] == "switch#bla::alias::desk_light"

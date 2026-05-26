@@ -409,10 +409,19 @@ def async_get_entities(
                 continue
             entities.append(alexa_entity)
             if include_aliases:
-                entities.extend(
-                    ENTITY_ADAPTERS[state.domain](hass, config, state, alias=alias)
-                    for alias in config.get_entity_aliases(state.entity_id)
-                )
+                for alias in config.get_entity_aliases(state.entity_id):
+                    try:
+                        entities.append(
+                            ENTITY_ADAPTERS[state.domain](
+                                hass, config, state, alias=alias
+                            )
+                        )
+                    except Exception:
+                        _LOGGER.exception(
+                            "Unable to serialize %s alias %s for discovery",
+                            state.entity_id,
+                            alias,
+                        )
 
     return entities
 

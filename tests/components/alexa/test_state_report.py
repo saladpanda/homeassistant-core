@@ -1120,5 +1120,25 @@ async def test_proactive_mode_filter_states(
             {"friendly_name": "Test Contact Sensor", "device_class": "door"},
         )
 
-        await hass.async_block_till_done()
+         await hass.async_block_till_done()
     assert len(aioclient_mock.mock_calls) == 1
+
+
+async def test_send_delete_message_for_endpoint_ids(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Test DeleteReport for explicit endpoint IDs."""
+    aioclient_mock.post(TEST_URL, json={"data": "is irrelevant"})
+
+    await state_report.async_send_delete_message_for_endpoint_ids(
+        hass,
+        get_default_config(hass),
+        ["switch#bla", "switch#bla::alias::desk_light"],
+    )
+
+    call_json = aioclient_mock.mock_calls[0][2]
+    assert call_json["event"]["header"]["name"] == "DeleteReport"
+    assert [
+        endpoint["endpointId"]
+        for endpoint in call_json["event"]["payload"]["endpoints"]
+    ] == ["switch#bla", "switch#bla::alias::desk_light"]
