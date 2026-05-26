@@ -1,5 +1,7 @@
 """Alexa message handlers."""
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Callable, Coroutine
 import logging
@@ -124,7 +126,7 @@ async def async_api_discovery(
     Async friendly.
     """
     discovery_endpoints: list[dict[str, Any]] = []
-    for alexa_entity in async_get_entities(hass, config):
+    for alexa_entity in async_get_entities(hass, config, include_aliases=True):
         if not config.should_expose(alexa_entity.entity_id):
             continue
         try:
@@ -1255,10 +1257,7 @@ async def async_api_set_mode(
             service = water_heater.SERVICE_SET_OPERATION_MODE
             data[water_heater.ATTR_OPERATION_MODE] = operation_mode
         else:
-            msg = (
-                f"Entity '{entity.entity_id}' does not support"
-                f" Operation mode '{operation_mode}'"
-            )
+            msg = f"Entity '{entity.entity_id}' does not support Operation mode '{operation_mode}'"
             raise AlexaInvalidValueError(msg)
 
     # Cover Position
