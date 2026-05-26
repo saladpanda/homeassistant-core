@@ -1,5 +1,7 @@
 """The HTTP api to control the cloud integration."""
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from contextlib import suppress
@@ -29,6 +31,7 @@ from homeassistant.components.homeassistant import exposed_entities
 from homeassistant.components.http import KEY_HASS, HomeAssistantView, require_admin
 from homeassistant.components.http.data_validator import RequestDataValidator
 from homeassistant.components.system_health import get_info as get_system_health_info
+from homeassistant.const import CLOUD_NEVER_EXPOSED_ENTITIES
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
@@ -137,8 +140,7 @@ def async_setup(hass: HomeAssistant) -> None:
             ),
             MFAExpiredOrNotStarted: (
                 HTTPStatus.BAD_REQUEST,
-                "Multi-factor authentication expired,"
-                " or not started. Please try again.",
+                "Multi-factor authentication expired, or not started. Please try again.",
             ),
             AlreadyConnectedError: (
                 HTTPStatus.CONFLICT,
@@ -561,12 +563,7 @@ class DownloadSupportPackageView(HomeAssistantView):
                 markdown += "--- | --- | --- | ---\n"
                 for integration in integration_info["custom_integrations"]:
                     doc_url = integration.get("documentation") or "N/A"
-                    markdown += (
-                        f"{integration['domain']} | "
-                        f"{integration['name']} | "
-                        f"{integration['version']} | "
-                        f"{doc_url}\n"
-                    )
+                    markdown += f"{integration['domain']} | {integration['name']} | {integration['version']} | {doc_url}\n"
                 markdown += "\n</details>\n\n"
 
         for domain, domain_info in domains_info.items():
@@ -972,7 +969,7 @@ async def google_assistant_get(
         return
 
     entity = google_helpers.GoogleEntity(hass, gconf, state)
-    if not entity.is_supported():
+    if entity_id in CLOUD_NEVER_EXPOSED_ENTITIES or not entity.is_supported():
         connection.send_error(
             msg["id"],
             websocket_api.ERR_NOT_SUPPORTED,
@@ -1074,7 +1071,9 @@ async def alexa_get(
     """Get data for a single alexa entity."""
     entity_id: str = msg["entity_id"]
 
-    if not entity_supported_by_alexa(hass, entity_id):
+    if entity_id in CLOUD_NEVER_EXPOSED_ENTITIES or not entity_supported_by_alexa(
+        hass, entity_id
+    ):
         connection.send_error(
             msg["id"],
             websocket_api.ERR_NOT_SUPPORTED,
@@ -1098,7 +1097,9 @@ async def alexa_list(
     """List all alexa entities."""
     cloud = hass.data[DATA_CLOUD]
     alexa_config = await cloud.client.get_alexa_config()
-    entities = alexa_entities.async_get_entities(hass, alexa_config)
+    entities = alexa_entities.async_get_entities(
+        hass, alexa_config, include_aliases=False
+    )
 
     result = [
         {

@@ -1,5 +1,7 @@
 """Alexa entity adapters."""
 
+from __future__ import annotations
+
 from collections.abc import Generator, Iterable
 import logging
 from typing import TYPE_CHECKING, Any
@@ -39,6 +41,7 @@ from homeassistant.const import (
     ATTR_DEVICE_CLASS,
     ATTR_SUPPORTED_FEATURES,
     ATTR_UNIT_OF_MEASUREMENT,
+    CLOUD_NEVER_EXPOSED_ENTITIES,
     CONF_DESCRIPTION,
     CONF_NAME,
     UnitOfTemperature,
@@ -47,6 +50,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.helpers import network
 from homeassistant.helpers.entity import entity_sources
+from homeassistant.util import slugify
 from homeassistant.util.decorator import Registry
 
 from .capabilities import (
@@ -268,12 +272,17 @@ class AlexaEntity:
     """
 
     def __init__(
-        self, hass: HomeAssistant, config: AbstractConfig, entity: State
+        self,
+        hass: HomeAssistant,
+        config: AbstractConfig,
+        entity: State,
+        alias: str | None = None,
     ) -> None:
         """Initialize Alexa Entity."""
         self.hass = hass
         self.config = config
         self.entity = entity
+        self.alias = alias
         self.entity_conf = config.entity_config.get(entity.entity_id, {})
 
     @property
@@ -283,6 +292,9 @@ class AlexaEntity:
 
     def friendly_name(self) -> str:
         """Return the Alexa API friendly name."""
+        if self.alias is not None:
+            return self.alias.translate(TRANSLATION_TABLE)
+
         friendly_name: str = self.entity_conf.get(
             CONF_NAME, self.entity.name
         ).translate(TRANSLATION_TABLE)
@@ -290,12 +302,27 @@ class AlexaEntity:
 
     def description(self) -> str:
         """Return the Alexa API description."""
-        description = self.entity_conf.get(CONF_DESCRIPTION) or self.entity_id
-        return f"{description} via Home Assistant".translate(TRANSLATION_TABLE)
+        description = (self.entity_conf.get(CONF_DESCRIPTION) or self.entity_id).translate(
+            TRANSLATION_TABLE
+        )
+
+        if self.alias is not None:
+            return f"{description} (alias: {self.alias}) via Home Assistant"
+
+        return f"{description} via Home Assistant"
 
     def alexa_id(self) -> str:
         """Return the Alexa API entity id."""
-        return self.config.generate_alexa_id(self.entity.entity_id)
+        return self.config.generate_alexa_id_for(self.entity.entity_id, self.alias)
+
+    def custom_identifier(self) -> str:
+        """Return the Alexa custom identifier."""
+        custom_identifier = f"{self.config.user_identifier()}-{self.entity_id}"
+
+        if self.alias is None:
+            return custom_identifier
+
+        return f"{custom_identifier}-alias-{slugify(self.alias)}"
 
     def display_categories(self) -> list[str] | None:
         """Return a list of display categories."""
@@ -342,7 +369,7 @@ class AlexaEntity:
                 "manufacturer": "Home Assistant",
                 "model": self.entity.domain,
                 "softwareVersion": __version__,
-                "customIdentifier": f"{self.config.user_identifier()}-{self.entity_id}",
+                "customIdentifier": self.custom_identifier(),
             },
         }
 
@@ -367,11 +394,14 @@ class AlexaEntity:
 
 @callback
 def async_get_entities(
-    hass: HomeAssistant, config: AbstractConfig
+    hass: HomeAssistant, config: AbstractConfig, *, include_aliases: bool = True
 ) -> list[AlexaEntity]:
     """Return all entities that are supported by Alexa."""
     entities: list[AlexaEntity] = []
     for state in hass.states.async_all():
+        if state.entity_id in CLOUD_NEVER_EXPOSED_ENTITIES:
+            continue
+
         if state.domain not in ENTITY_ADAPTERS:
             continue
 
@@ -384,6 +414,20 @@ def async_get_entities(
             if not interfaces:
                 continue
             entities.append(alexa_entity)
+            if include_aliases:
+                for alias in config.get_entity_aliases(state.entity_id):
+                    try:
+                        entities.append(
+                            ENTITY_ADAPTERS[state.domain](
+                                hass, config, state, alias=alias
+                            )
+                        )
+                    except Exception:
+                        _LOGGER.exception(
+                            "Unable to serialize %s alias %s for discovery",
+                            state.entity_id,
+                            alias,
+                        )
 
     return entities
 
