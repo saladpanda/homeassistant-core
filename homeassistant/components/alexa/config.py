@@ -21,6 +21,7 @@ from .entities import TRANSLATION_TABLE
 from .state_report import async_enable_proactive_mode
 
 STORE_AUTHORIZED = "authorized"
+ALEXA_ALIAS_DELIMITER = "::alias::"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,7 +29,6 @@ _LOGGER = logging.getLogger(__name__)
 class AbstractConfig(ABC):
     """Hold the configuration for Alexa."""
 
-    _ALEXA_ALIAS_DELIMITER = "::alias::"
     _store: AlexaConfigStore
     _unsub_proactive_report: CALLBACK_TYPE | None = None
 
@@ -118,7 +118,7 @@ class AbstractConfig(ABC):
         if alias is None:
             return alexa_id
 
-        return f"{alexa_id}{self._ALEXA_ALIAS_DELIMITER}{slugify(alias)}"
+        return f"{alexa_id}{ALEXA_ALIAS_DELIMITER}{slugify(alias)}"
 
     @callback
     def get_entity_aliases(self, entity_id: str) -> list[str]:
@@ -171,7 +171,7 @@ class AbstractConfig(ABC):
     @callback
     def resolve_entity_id(self, endpoint_id: str) -> str:
         """Resolve an Alexa endpoint ID back to an entity ID."""
-        entity_endpoint_id = endpoint_id.split(self._ALEXA_ALIAS_DELIMITER, 1)[0]
+        entity_endpoint_id = endpoint_id.split(ALEXA_ALIAS_DELIMITER, 1)[0]
         return entity_endpoint_id.replace("#", ".")
 
     @callback

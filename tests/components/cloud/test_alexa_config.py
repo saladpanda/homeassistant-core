@@ -582,6 +582,50 @@ async def test_alexa_full_sync_deduplicates_aliased_entities(
     mock_sync_helper.assert_awaited_once_with([entry.entity_id], [])
 
 
+@pytest.mark.usefixtures("mock_cloud_login")
+async def test_alexa_entity_registry_sync_alias_rename(
+    hass: HomeAssistant,
+    entity_registry: er.EntityRegistry,
+    cloud_prefs: CloudPreferences,
+) -> None:
+    """Test Alexa config syncs when an alias is renamed in a single update."""
+    expose_new(hass, True)
+
+    conf = alexa_config.CloudAlexaConfig(
+        hass, ALEXA_SCHEMA({}), "mock-user-id", cloud_prefs, hass.data[DATA_CLOUD]
+    )
+    await conf.async_initialize()
+
+    entry = entity_registry.async_get_or_create(
+        "light", "test", "unique", suggested_object_id="kitchen"
+    )
+    entity_registry.async_update_entity(entry.entity_id, aliases={"Desk Light"})
+    await hass.async_block_till_done()
+
+    with (
+        patch(
+            "homeassistant.components.cloud.alexa_config.CloudAlexaConfig._sync_helper",
+            AsyncMock(return_value=True),
+        ) as mock_sync_helper,
+        patch(
+            "homeassistant.components.cloud.alexa_config.alexa_state_report."
+            "async_send_delete_message_for_endpoint_ids",
+            AsyncMock(),
+        ) as mock_delete,
+    ):
+        entity_registry.async_update_entity(
+            entry.entity_id, aliases={"Reading Light"}
+        )
+        await hass.async_block_till_done()
+
+    mock_sync_helper.assert_awaited_once_with([entry.entity_id], [])
+    mock_delete.assert_awaited_once_with(
+        hass,
+        conf,
+        ["light#kitchen::alias::desk_light"],
+    )
+
+
 async def test_alexa_update_report_state(
     hass: HomeAssistant, cloud_prefs: CloudPreferences, cloud_stub: Mock
 ) -> None:

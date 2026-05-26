@@ -12,6 +12,7 @@ from homeassistant.components.alexa import config, smart_home
 from homeassistant.components.alexa.const import CONF_ENDPOINT, CONF_FILTER, CONF_LOCALE
 from homeassistant.core import Context, HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import entityfilter
+from homeassistant.helpers.entity_registry import COMPUTED_NAME
 
 from tests.common import async_mock_service
 
@@ -270,3 +271,34 @@ class ReportedProperties:
             return prop_set
 
         pytest.fail(f"property {namespace}:{name} not in {self.properties!r}")
+
+
+async def test_normalize_aliases_filters_computed_name(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    """Test normalize_aliases filters out COMPUTED_NAME entries."""
+    config = get_default_config(hass)
+    entity_registry.async_get_or_create("switch", "test", "bla", suggested_object_id="bla")
+    entity_registry.async_update_entity(
+        "switch.bla", aliases={COMPUTED_NAME, "Desk Light"}
+    )
+    result = config.get_entity_aliases("switch.bla")
+    assert result == ["Desk Light"]
+
+
+async def test_normalize_aliases_deduplicates_same_slug(
+    hass: HomeAssistant,
+) -> None:
+    """Test normalize_aliases deduplicates aliases that translate to the same Alexa ID."""
+    config = get_default_config(hass)
+    result = config.normalize_aliases("switch.bla", ["Desk Light!", "Desk Light"])
+    assert result == ["Desk Light"]
+
+
+async def test_normalize_aliases_filters_empty_after_translation(
+    hass: HomeAssistant,
+) -> None:
+    """Test normalize_aliases filters aliases that become empty after translation."""
+    config = get_default_config(hass)
+    result = config.normalize_aliases("switch.bla", ['"""', "Desk Light"])
+    assert result == ["Desk Light"]

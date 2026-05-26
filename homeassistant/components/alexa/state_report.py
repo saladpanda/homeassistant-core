@@ -426,7 +426,7 @@ async def async_send_changereport_message(
 
         except TimeoutError, aiohttp.ClientError:
             _LOGGER.error("Timeout sending report to Alexa for %s", alexa_entity.entity_id)
-            return
+            continue
 
         response_text = await response.text()
 
@@ -486,10 +486,19 @@ async def async_send_add_or_update_message(
 
         alexa_entity = ENTITY_ADAPTERS[domain](hass, config, state)
         endpoints.append(alexa_entity.serialize_discovery())
-        endpoints.extend(
-            ENTITY_ADAPTERS[domain](hass, config, state, alias=alias).serialize_discovery()
-            for alias in config.get_entity_aliases(entity_id)
-        )
+        for alias in config.get_entity_aliases(entity_id):
+            try:
+                endpoints.append(
+                    ENTITY_ADAPTERS[domain](
+                        hass, config, state, alias=alias
+                    ).serialize_discovery()
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Unable to serialize %s alias %s for AddOrUpdateReport",
+                    entity_id,
+                    alias,
+                )
 
     payload: dict[str, Any] = {
         "endpoints": endpoints,
@@ -600,7 +609,7 @@ async def async_send_doorbell_event_message(
 
         except TimeoutError, aiohttp.ClientError:
             _LOGGER.error("Timeout sending report to Alexa for %s", alexa_entity.entity_id)
-            return
+            continue
 
         response_text = await response.text()
 
